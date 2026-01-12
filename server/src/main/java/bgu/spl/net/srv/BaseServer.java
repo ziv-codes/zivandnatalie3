@@ -2,6 +2,7 @@ package bgu.spl.net.srv;
 
 import bgu.spl.net.api.MessageEncoderDecoder;
 import bgu.spl.net.api.MessagingProtocol;
+import bgu.spl.net.api.StompMessagingProtocol;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -14,6 +15,11 @@ public abstract class BaseServer<T> implements Server<T> {
     private final Supplier<MessageEncoderDecoder<T>> encdecFactory;
     private ServerSocket sock;
 
+    // שדות חדשים עבוד STOMP
+    private final Supplier<StompMessagingProtocol<T>> stompFactory;
+    private final ConnectionsImpl<T> connections; 
+    private int idCounter = 0;
+
     public BaseServer(
             int port,
             Supplier<MessagingProtocol<T>> protocolFactory,
@@ -23,6 +29,25 @@ public abstract class BaseServer<T> implements Server<T> {
         this.protocolFactory = protocolFactory;
         this.encdecFactory = encdecFactory;
 		this.sock = null;
+        this.stompFactory = null;
+        this.connections = null;
+    }
+
+    // בנאי חדש עבור STOMP
+    public BaseServer(
+            int port,
+            Supplier<StompMessagingProtocol<T>> stompFactory,
+            Supplier<MessageEncoderDecoder<T>> encdecFactory,
+            boolean isStomp) { // בוליאן דמי כדי ליצור חתימה שונה (Overloading)
+
+        this.port = port;
+        this.protocolFactory = null; // אין פרוטוקול ישן
+        this.stompFactory = stompFactory;
+        this.encdecFactory = encdecFactory;
+        this.sock = null;
+        
+        // כאן יוצרים את המרכזייה המשותפת לכל הלקוחות
+        this.connections = new ConnectionsImpl<>(); 
     }
 
     @Override
@@ -37,10 +62,34 @@ public abstract class BaseServer<T> implements Server<T> {
 
                 Socket clientSock = serverSock.accept();
 
-                BlockingConnectionHandler<T> handler = new BlockingConnectionHandler<>(
+                BlockingConnectionHandler<T> handler;
+                if (stompFactory != null) {
+                    // --- לוגיקה של STOMP ---
+                    
+                    // א. יצירת הפרוטוקול החדש
+                    StompMessagingProtocol<T> protocol = stompFactory.get();
+                   
+                    handler = new BlockingConnectionHandler<>(
+                            clientSock,
+                            encdecFactory.get(),
+                            protocol
+                    );
+
+                    int connectionId = idCounter++; // יצירת ID ייחודי
+                    
+                    // אתחול הפרוטוקול עם ה-ID והמרכזייה
+                    protocol.start(connectionId, connections); 
+                    
+                    // הוספת ההנדלר למרכזייה כדי שיוכל לקבל הודעות מאחרים
+                    connections.addConnection(connectionId, handler);
+                    
+                }
+                else{ 
+                    handler= new BlockingConnectionHandler<>(
                         clientSock,
                         encdecFactory.get(),
                         protocolFactory.get());
+                }
 
                 execute(handler);
             }

@@ -2,6 +2,7 @@ package bgu.spl.net.srv;
 
 import bgu.spl.net.api.MessageEncoderDecoder;
 import bgu.spl.net.api.MessagingProtocol;
+import bgu.spl.net.api.StompMessagingProtocol;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedSelectorException;
@@ -17,6 +18,11 @@ public class Reactor<T> implements Server<T> {
     private final int port;
     private final Supplier<MessagingProtocol<T>> protocolFactory;
     private final Supplier<MessageEncoderDecoder<T>> readerFactory;
+    // --- שדות חדשים עבור STOMP ---
+    private final Supplier<StompMessagingProtocol<T>> stompFactory;
+    private final ConnectionsImpl<T> connections;
+    private int idCounter = 0;
+
     private final ActorThreadPool pool;
     private Selector selector;
 
@@ -33,6 +39,25 @@ public class Reactor<T> implements Server<T> {
         this.port = port;
         this.protocolFactory = protocolFactory;
         this.readerFactory = readerFactory;
+        this.stompFactory = null;
+        this.connections = null;
+    }
+    // בנאי חדש (STOMP Overloading)
+    public Reactor(
+            int numThreads,
+            int port,
+            Supplier<StompMessagingProtocol<T>> stompFactory,
+            Supplier<MessageEncoderDecoder<T>> readerFactory,
+            boolean isStomp) {
+
+        this.pool = new ActorThreadPool(numThreads);
+        this.port = port;
+        this.protocolFactory = null;
+        this.stompFactory = stompFactory;
+        this.readerFactory = readerFactory;
+        
+        // יצירת המרכזייה
+        this.connections = new ConnectionsImpl<>();
     }
 
     @Override
@@ -95,12 +120,35 @@ public class Reactor<T> implements Server<T> {
     private void handleAccept(ServerSocketChannel serverChan, Selector selector) throws IOException {
         SocketChannel clientChan = serverChan.accept();
         clientChan.configureBlocking(false);
-        final NonBlockingConnectionHandler<T> handler = new NonBlockingConnectionHandler<>(
+         NonBlockingConnectionHandler<T> handler; 
+         if (stompFactory != null) {
+            // --- לוגיקה של STOMP ---
+            
+            // א. יצירת הפרוטוקול החדש
+            StompMessagingProtocol<T> protocol = stompFactory.get();
+           
+            handler= new NonBlockingConnectionHandler<>(
+                    readerFactory.get(),
+                    protocol,
+                    clientChan,
+                    this);
+            
+            int connectionId = idCounter++; // יצירת ID ייחודי
+            
+            // אתחול הפרוטוקול עם ה-ID והמרכזייה
+            protocol.start(connectionId, connections); 
+            
+            // הוספת ההנדלר למרכזייה כדי שיוכל לקבל הודעות מאחרים
+            connections.addConnection(connectionId, handler);
+            } else {
+                handler= new NonBlockingConnectionHandler<>(
                 readerFactory.get(),
                 protocolFactory.get(),
                 clientChan,
                 this);
-        clientChan.register(selector, SelectionKey.OP_READ, handler);
+            }
+            
+            clientChan.register(selector, SelectionKey.OP_READ, handler);
     }
 
     private void handleReadWrite(SelectionKey key) {

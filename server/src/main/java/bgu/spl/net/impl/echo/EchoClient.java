@@ -26,13 +26,27 @@ public class EchoClient {
                 BufferedWriter out = new BufferedWriter(new OutputStreamWriter(sock.getOutputStream()))) {
 
             System.out.println("sending message to server");
-            out.write(args[1]);
-            out.newLine();
+
+            String stompConnect = "CONNECT\n" +
+                                  "accept-version:1.2\n" +
+                                  "host:stomp.cs.bgu.ac.il\n" +
+                                  "login:guest\n" +
+                                  "passcode:guest\n" +
+                                  "\n" + 
+                                  "\u0000"; // <--- זה הדבר הכי חשוב! תו ה-Null
+
+            System.out.println("sending CONNECT frame...");
+            out.write(stompConnect);
+            // out.newLine();
             out.flush();
 
             System.out.println("awaiting response");
-            String line = in.readLine();
-            System.out.println("message from server: " + line);
+            String line;
+            while ((line = in.readLine()) != null) {
+                System.out.println(line);
+                if (line.isEmpty()) break; // בדרך כלל מפסיקים לקרוא אחרי ההדרים, אבל לטסט זה מספיק
+                if (line.contains("\u0000")) break; // סיום הפריים
+            }
         }
     }
 }
