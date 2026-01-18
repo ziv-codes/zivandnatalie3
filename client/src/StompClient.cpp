@@ -27,11 +27,13 @@ void socketReaderTask(ConnectionHandler& handler, StompProtocol& protocol) {
 }
 
 int main(int argc, char *argv[]) {
+	std::cout << "Welcome to Stomp Client!" << std::endl;
     ConnectionHandler* handler = nullptr;
     StompProtocol protocol;
     string currentUserName = "";
 
     while (true) {
+		std::cout << "Waiting for your command.." << std::endl;
         const short bufSize = 1024;
         char buf[bufSize];
         if (!cin.getline(buf, bufSize)) break;

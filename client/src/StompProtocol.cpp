@@ -1,6 +1,3 @@
-#pragma once
-
-
 #include "../include/StompProtocol.h"
 #include "../include/event.h"
 #include <sstream>
@@ -58,7 +55,7 @@ string StompProtocol::parseUserCommand(string input, string& userName) {
             
             for (const auto& event : report_data.events) {
                 // קריאה לפעולה הנפרדת עבור כל אירוע
-                allFrames += createSendFrame(event, userName);
+                allFrames += createSendFrame(event, userName, fileName);
             }
             return allFrames;
     }
@@ -208,7 +205,7 @@ string StompProtocol::createDisconnectFrame() {
     return "DISCONNECT\nreceipt:" + to_string(receiptId) + "\n\n";
 }
 
-string StompProtocol::createSendFrame(const Event& event, const string& userName) {
+string StompProtocol::createSendFrame(const Event& event, const string& userName,const string& filename) {
     
     stringstream frame;
 
@@ -216,6 +213,8 @@ string StompProtocol::createSendFrame(const Event& event, const string& userName
     frame << "SEND" << "\n";
     // ה-destination נבנה משמות שתי הקבוצות
     frame << "destination:/" << event.get_team_a_name() << "_" << event.get_team_b_name() << "\n";
+    frame << "filename:" << filename << "\n";
+
     frame << "\n"; // שורה ריקה חובה בין ה-Headers ל-Body
 
     // 2. Body (לפי הפורמט הנדרש ב-SPL)
@@ -226,19 +225,21 @@ string StompProtocol::createSendFrame(const Event& event, const string& userName
     frame << "time: " << event.get_time() << "\n";
 
     frame << "general game updates:\n";
-    for (auto const& [key, val] : event.get_game_updates()) {
-        frame << "    " << key << ": " << val << "\n";
+    // שינוי כאן: שימוש ב-pair במקום structured binding
+    for (auto const& it : event.get_game_updates()) {
+        frame << "    " << it.first << ": " << it.second << "\n";
     }
 
     frame << "team a updates:\n";
-    for (auto const& [key, val] : event.get_team_a_updates()) {
-        frame << "    " << key << ": " << val << "\n";
+    for (auto const& it : event.get_team_a_updates()) {
+        frame << "    " << it.first << ": " << it.second << "\n";
     }
 
     frame << "team b updates:\n";
-    for (auto const& [key, val] : event.get_team_b_updates()) {
-        frame << "    " << key << ": " << val << "\n";
-    }
+    for (auto const& it : event.get_team_b_updates()) {
+        frame << "    " << it.first << ": " << it.second << "\n";
+    }   
+
 
     // שימוש ב-get_discription כפי שמופיע ב-event.cpp שלך
     frame << "description:\n" << event.get_discription() << "\n";

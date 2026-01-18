@@ -5,6 +5,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include "../include/event.h"
 
 
 
@@ -46,7 +47,7 @@ public:
     std::string createSubscribeFrame(std::string gameName);
     std::string createUnsubscribeFrame(std::string gameName);
     std::string createDisconnectFrame();
-    std::string createSendFrame(const Event& event, const std::string& userName);
+    std::string createSendFrame(const Event& event, const std::string& userName, const std::string& filename);
     
     void generateSummary(std::string gameName, std::string userName, std::string file);
 };
