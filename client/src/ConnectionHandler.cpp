@@ -79,7 +79,7 @@ bool ConnectionHandler::getFrameAscii(std::string &frame, char delimiter) {
 	// Notice that the null character is not appended to the frame string.
 	try {
 		do {
-			if (!getBytes(&ch, 1)) {
+			if (!getBytes(&ch, 1)) { //blocking call returns false if connection closed / got error
 				return false;
 			}
 			if (ch != '\0')
