@@ -3,6 +3,7 @@ package bgu.spl.net.impl.stomp;
 import bgu.spl.net.api.StompMessagingProtocol;
 import bgu.spl.net.srv.Connections;
 import bgu.spl.net.srv.ConnectionsImpl;
+import bgu.spl.net.srv.DatabaseService;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,6 +14,8 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     private Connections<String> connections;
     private boolean shouldTerminate = false;
     private boolean isLoggedIn = false;
+    private DatabaseService db = new DatabaseService();
+    private String currentUsername = null; // כדי שנזכור מי המשתמש המחובר לצורך Logout/Report
 
     
     // מפתח: subscription-id, ערך: channel-name
@@ -76,25 +79,49 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
         String passcode = frame.getHeader("passcode");
         String acceptVersion = frame.getHeader("accept-version");
 
-        // בדיקת גרסה (אופציונלי אך מומלץ)
+        // בדיקת גרסה 
         if (acceptVersion != null && !acceptVersion.contains("1.2")) {
             sendError("Version not supported", "Supported version is 1.2");
             return;
         }
 
-        // בדיקת אימות משתמש (כרגע תמיד מצליח אם השדות קיימים)
         if (login != null && passcode != null) {
-            isLoggedIn = true; // המשתמש מחובר כעת
+            // --- התחלת שינוי SQL ---
+            
+            // 1. שולחים שאילתה לפייתון: "מה הסיסמה של המשתמש הזה?"
+            String passwordFromDb = db.execute("SELECT password FROM Users WHERE username='" + login + "'");
 
-            String response = "CONNECTED\n" +
-                              "version:1.2\n" +
-                              "\n" +
-                              "\u0000";
-            connections.send(connectionId, response);
-        } else {
-            sendError("Authentication Failed", "Missing login or passcode header.");
+            // לפי דרישות המטלה: אם המשתמש לא קיים (חזר ריק), רושמים אותו אוטומטית
+            if (passwordFromDb == null || passwordFromDb.trim().isEmpty() || passwordFromDb.startsWith("Error")) {
+                db.execute("INSERT INTO Users (username, password) VALUES ('" + login + "', '" + passcode + "')");
+                passwordFromDb = passcode; // מתייחסים לזה כאילו הסיסמה נכונה (כי הוא הרגע נרשם)
+            }
+
+            // 2. בודקים אם הסיסמה תואמת
+            if (passwordFromDb.trim().equals(passcode)) {
+                isLoggedIn = true;
+                currentUsername = login; // שומרים את השם בצד לשימוש מאוחר יותר
+
+                // 3. מתעדים את הכניסה בטבלת ההיסטוריה
+                db.execute("INSERT INTO Login_History (username, login_time) VALUES ('" + login + "', datetime('now'))");
+
+                
+                String response = "CONNECTED\n" +
+                                "version:1.2\n" +
+                                "\n" +
+                                "\u0000";
+                connections.send(connectionId, response);
+            } else {
+                // סיסמה שגויה
+                sendError("Login Failed", "Wrong password");
+            }
+    // --- סוף שינוי SQL ---
+    } else {
+        sendError("Authentication Failed", "Missing login or passcode header.");
         }
     }
+    
+    
 
     private void handleSubscribe(Frame frame) {
         String destination = frame.getHeader("destination");
@@ -150,6 +177,15 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             return;
         }
 
+        // --- תוספת SQL: תיעוד קבצים ---
+        // נבדוק אם הלקוח שלח header בשם 'file-name'. אם כן, סימן שזה דיווח על קובץ
+        String fileName = frame.getHeader("file-name");
+        if (fileName != null && currentUsername != null) {
+            // שליחת פקודת INSERT לשרת הפייתון כדי לשמור את שם הקובץ והמשתמש
+            db.execute("INSERT INTO Uploaded_Files (username, filename) VALUES ('" + currentUsername + "', '" + fileName + "')");
+        }
+        // -----------------------------
+
         // יצירת הודעת MESSAGE שתשלח לכל המנויים בערוץ
         String messageFrame = "MESSAGE\n" +
                               "destination:" + destination + "\n" +
@@ -164,9 +200,27 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     }
 
     private void handleDisconnect(Frame frame) {
+        // --- 1. SQL: תיעוד יציאה ב-DB ---
+        if (currentUsername != null) {
+            // מעדכן את שעת היציאה (Logout Time) לרשומה האחרונה של המשתמש
+            db.execute("UPDATE Login_History SET logout_time=datetime('now') WHERE id = (SELECT MAX(id) FROM Login_History WHERE username='" + currentUsername + "')");
+        }
+
+        // --- 2. Logic: מחיקת המשתמש מכל רשימות התפוצה (Topics) ---
+        // אנחנו עוברים על המפה המקומית שלנו שיודעת לאילו ערוצים המשתמש נרשם
+        for (String channel : subscriberIdToChannel.values()) {
+            // מסירים אותו מרשימת התפוצה ב-Connections
+            ((ConnectionsImpl<String>) connections).unsubscribeFromChannel(channel, connectionId);
+        }
+        // מנקים את המפה המקומית
+        subscriberIdToChannel.clear();
+
+        // --- 3. Protocol: סיום החיבור ---
         sendReceiptIfNeeded(frame);
-        shouldTerminate = true; // סימון לשרת לסגור את הסוקט
-        connections.disconnect(connectionId); // מחיקה מרשימת הלקוחות הפעילים
+        shouldTerminate = true;
+        isLoggedIn = false;
+        currentUsername = null;
+        connections.disconnect(connectionId);
     }
 
     // --- פונקציות עזר (Utils) ---
