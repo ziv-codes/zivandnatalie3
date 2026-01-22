@@ -41,6 +41,7 @@ public:
     bool waitForLogout();
 
     bool getIsLoggedIn() const;
+    void setIsLoggedIn(const bool status);
 
     // ייצור פריימים
     std::string createConnectFrame(std::string host, std::string user, std::string pass);

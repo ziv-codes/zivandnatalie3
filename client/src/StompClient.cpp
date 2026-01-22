@@ -10,6 +10,9 @@ void socketReaderTask(ConnectionHandler& handler, StompProtocol& protocol) {
     while (true) {
         string frame;
         if (!handler.getFrameAscii(frame, '\0')) {   //מבטיח שגם בעת אררור התרד יסגר
+            std::cout << "Error: Connection to server lost." << std::endl;
+            protocol.setIsLoggedIn(false); 
+            handler.close();  
             break;
         }
         string response = protocol.processServerFrame(frame);
@@ -21,6 +24,7 @@ void socketReaderTask(ConnectionHandler& handler, StompProtocol& protocol) {
 
 		// בדיקה האם המילה הראשונה היא logout או Error
 		if (firstWord == "logout" || firstWord == "Error") {
+            handler.close();  
 			break;
 		}
 	}
@@ -33,7 +37,7 @@ int main(int argc, char *argv[]) {
     string currentUserName = "";
 
     while (true) {
-		std::cout << "Waiting for your command.." << std::endl;
+		std::cout << "Waiting for your command:" << std::endl;
         const short bufSize = 1024;
         char buf[bufSize];
         if (!cin.getline(buf, bufSize)) break;
@@ -55,6 +59,11 @@ int main(int argc, char *argv[]) {
             size_t colonPos = hostPort.find(':');
             string host = hostPort.substr(0, colonPos);
             short port = static_cast<short>(stoi(hostPort.substr(colonPos + 1)));
+            
+            if (user.empty() || pass.empty() || host.empty() || port <= 0) {
+                cout << "Wrong login command / missing parameters: login host:port username password" << endl;
+                continue;
+            }
 
             handler = new ConnectionHandler(host, port);
             if (!handler->connect()) {
@@ -93,11 +102,17 @@ int main(int argc, char *argv[]) {
         }
         else if (isLoggedIn) {
             string frames = protocol.parseUserCommand(userInput, currentUserName);
-			if (frames=="")
+			if (frames=="error"){ // Not need since user command is valid
+                std::cout << "Wrong command please try again. \n" << std::endl;
 				continue;
+            }   
+            if (frames==""){
+                continue; // אין צורך לשלוח פריים לשרת
+            }
             stringstream frameStream(frames);
             string singleFrame;
             while (getline(frameStream, singleFrame, '\0')) { //אם יש כמה פריימים - במקרה של report
+                
                 if (!singleFrame.empty()) handler->sendFrameAscii(singleFrame, '\0');
             }
         }
