@@ -15,6 +15,7 @@ void socketReaderTask(ConnectionHandler& handler, StompProtocol& protocol) {
             handler.close();  
             break;
         }
+       
         string response = protocol.processServerFrame(frame);
         if (!response.empty()) cout << response << endl;
 		
